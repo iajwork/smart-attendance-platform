@@ -1,16 +1,16 @@
 import math
 import pandas as pd
 
-OFFICE_LAT = 19.0760
-OFFICE_LON = 72.8777
-OFFICE_RADIUS = 100 
-
-def get_attendance_status(lat: float, lon: float) -> str:
+def is_within_geofence(lat: float, lon: float, office_lat: float, office_lon: float, radius: int) -> bool:
+    """Calculates if a given lat/lon is within the dynamic office radius. Returns Boolean."""
     if pd.isna(lat) or pd.isna(lon) or lat == 0 or lon == 0:
-        return "INVALID"
+        return False
+        
+    if pd.isna(office_lat) or pd.isna(office_lon):
+        return False # Failsafe if employee has no assigned location
 
-    R = 6371000 
-    lat1, lon1 = math.radians(OFFICE_LAT), math.radians(OFFICE_LON)
+    R = 6371000 # Earth radius in meters
+    lat1, lon1 = math.radians(office_lat), math.radians(office_lon)
     lat2, lon2 = math.radians(lat), math.radians(lon)
     
     dlat = lat2 - lat1
@@ -20,4 +20,4 @@ def get_attendance_status(lat: float, lon: float) -> str:
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     distance = R * c
     
-    return "IN_OFFICE" if distance <= OFFICE_RADIUS else "REMOTE"
+    return distance <= radius
