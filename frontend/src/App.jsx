@@ -332,22 +332,17 @@ export default function App() {
                           <tr key={rIdx} className="hover:bg-indigo-50/40 transition-colors group">
                             {Object.values(row).map((val, vIdx) => (
                               <td key={vIdx} className={`px-5 py-3.5 text-slate-600 font-medium ${vIdx === 0 ? 'text-slate-900 font-bold' : ''}`}>
-                                {val === 'Present' ? (
-                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>{val}
-                                  </span>
-                                ) : val === 'Absent' ? (
-                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-rose-100 text-rose-800 border border-rose-200">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>{val}
-                                  </span>
-                                ) : val === 'Half-day' ? (
-                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>{val}
-                                  </span>
-                                ) : val === 'Remote' ? (
-                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>{val}
-                                  </span>
+                                {/* BOOLEAN RENDER LOGIC */}
+                                {typeof val === 'boolean' ? (
+                                  val === true ? (
+                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Valid
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-rose-100 text-rose-800 border border-rose-200">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>Invalid
+                                    </span>
+                                  )
                                 ) : (
                                   val
                                 )}
