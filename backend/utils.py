@@ -2,7 +2,7 @@ import math
 import pandas as pd
 
 def get_location_status(lat: float, lon: float, office_lat: float, office_lon: float, radius: int) -> str:
-    # Return "REMOTE" instead of False if coordinates are bad
+    # Return "REMOTE" if coordinates are missing or bad
     if pd.isna(lat) or pd.isna(lon) or lat == 0 or lon == 0:
         return "REMOTE"
         
@@ -22,5 +22,5 @@ def get_location_status(lat: float, lon: float, office_lat: float, office_lon: f
     
     if distance <= radius:
         return "In office"
-    else: # <--- Missing colon fixed here!
+    else: 
         return "REMOTE"
