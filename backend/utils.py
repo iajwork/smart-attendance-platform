@@ -20,4 +20,7 @@ def is_within_geofence(lat: float, lon: float, office_lat: float, office_lon: fl
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     distance = R * c
     
-    return distance <= radius
+    if distance <= radius:
+        return "In office"
+    else
+        return "REMOTE"
