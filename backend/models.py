@@ -27,7 +27,8 @@ class ClockLogs(Base):
     latitude = Column(Float, nullable=False)
     longitude = Column(Float, nullable=False)
     punch_status = Column(String(10))
-    is_valid = Column(Boolean) # Geofencing result
+    is_valid = Column(Boolean) 
+    location_status = Column(String(20)) # <--- NEW COLUMN
     device_identifier = Column(String(100))
     address = Column(Text)
 
@@ -40,4 +41,5 @@ class DailyAttendance(Base):
     logout_time = Column(DateTime)
     total_working_hours = Column(Float)
     is_valid = Column(Boolean)
+    location_status = Column(String(20)) # <--- NEW COLUMN
     created_at = Column(DateTime, default=datetime.utcnow)
