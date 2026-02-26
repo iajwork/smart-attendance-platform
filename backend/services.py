@@ -85,7 +85,7 @@ async def process_csv_upload(file, db: Session):
     for _, row in df.iterrows():
         emp_data = emp_map.get(row['employee_code'])
         if emp_data:
-            # 1. Capture the "In office" or "REMOTE" string
+            # 1. Calculate the status using utils.py
             loc_status = utils.get_location_status(
                 lat=row['latitude'],
                 lon=row['longitude'],
@@ -94,9 +94,9 @@ async def process_csv_upload(file, db: Session):
                 radius=emp_data["radius"]
             )
             
-            # 2. Boolean is True if they are in office, False if remote
             is_valid_punch = (loc_status == "In office")
 
+            # 2. Save it to the database model
             log_entry = models.ClockLogs(
                 employee_id=emp_data["id"],
                 punch_timestamp=row['punch_timestamp'],
@@ -104,7 +104,7 @@ async def process_csv_upload(file, db: Session):
                 longitude=row['longitude'],
                 punch_status=row.get('punch_status'),
                 is_valid=is_valid_punch, 
-                location_status=loc_status, # <--- SAVE TO DB
+                location_status=loc_status, # <--- THIS IS THE MAGIC LINE
                 device_identifier=row.get('device_identifier'),
                 address=row.get('address')
             )
@@ -143,7 +143,7 @@ def calculate_daily_attendance(target_date: date, db: Session):
         
         first_log = group.loc[group['punch_timestamp'].idxmin()]
         attendance_is_valid = bool(first_log['is_valid'] and duration > 4)
-        daily_loc_status = first_log['location_status'] # Inherit the remote/in-office status from the first punch
+        daily_loc_status = first_log['location_status'] 
             
         existing_record = db.query(models.DailyAttendance).filter_by(employee_id=emp_id, attendance_date=target_date).first()
         if existing_record:
@@ -181,7 +181,7 @@ def fetch_daily_report(target_date: str, db: Session):
             "Out Time": att.logout_time.strftime("%H:%M") if att.logout_time else "-",
             "Hours": f"{att.total_working_hours} hrs" if att.total_working_hours else "-",
             "Status": att.is_valid, 
-            "Location": att.location_status # <--- PASS TO REACT
+            "Location": att.location_status 
         })
     
     return {
