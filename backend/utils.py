@@ -1,13 +1,13 @@
 import math
 import pandas as pd
 
-def is_within_geofence(lat: float, lon: float, office_lat: float, office_lon: float, radius: int) -> bool:
-    """Calculates if a given lat/lon is within the dynamic office radius. Returns Boolean."""
+def get_location_status(lat: float, lon: float, office_lat: float, office_lon: float, radius: int) -> str:
+    # Return "REMOTE" instead of False if coordinates are bad
     if pd.isna(lat) or pd.isna(lon) or lat == 0 or lon == 0:
-        return False
+        return "REMOTE"
         
     if pd.isna(office_lat) or pd.isna(office_lon):
-        return False # Failsafe if employee has no assigned location
+        return "REMOTE"
 
     R = 6371000 # Earth radius in meters
     lat1, lon1 = math.radians(office_lat), math.radians(office_lon)
@@ -22,5 +22,5 @@ def is_within_geofence(lat: float, lon: float, office_lat: float, office_lon: fl
     
     if distance <= radius:
         return "In office"
-    else
+    else: # <--- Missing colon fixed here!
         return "REMOTE"
