@@ -332,7 +332,6 @@ export default function App() {
                           <tr key={rIdx} className="hover:bg-indigo-50/40 transition-colors group">
                             {Object.values(row).map((val, vIdx) => (
                               <td key={vIdx} className={`px-5 py-3.5 text-slate-600 font-medium ${vIdx === 0 ? 'text-slate-900 font-bold' : ''}`}>
-                                {/* BOOLEAN RENDER LOGIC */}
                                 {typeof val === 'boolean' ? (
                                   val === true ? (
                                     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
@@ -343,6 +342,14 @@ export default function App() {
                                       <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>Invalid
                                     </span>
                                   )
+                                ) : val === 'In office' ? (
+                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>In office
+                                    </span>
+                                ) : val === 'REMOTE' ? (
+                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-purple-100 text-purple-800 border border-purple-200">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-purple-500"></span>REMOTE
+                                    </span>
                                 ) : (
                                   val
                                 )}
