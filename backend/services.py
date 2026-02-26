@@ -4,6 +4,7 @@ from datetime import date
 import io
 import models
 import utils
+import calendar
 
 async def process_csv_upload(file, db: Session):
     contents = await file.read()
@@ -78,14 +79,14 @@ async def process_csv_upload(file, db: Session):
         "id": emp.EmployeeMaster.employee_id,
         "loc_lat": emp.LocationMaster.latitude if emp.LocationMaster else None,
         "loc_lon": emp.LocationMaster.longitude if emp.LocationMaster else None,
-        "radius": emp.LocationMaster.radius if emp.LocationMaster else 100
+        "radius": emp.LocationMaster.radius if emp.LocationMaster else 1000
     } for emp in employees_in_db}
     
     records_inserted = 0
     for _, row in df.iterrows():
         emp_data = emp_map.get(row['employee_code'])
         if emp_data:
-            # 1. Calculate the status using utils.py
+            # Calculate status using utils.py
             loc_status = utils.get_location_status(
                 lat=row['latitude'],
                 lon=row['longitude'],
@@ -96,7 +97,6 @@ async def process_csv_upload(file, db: Session):
             
             is_valid_punch = (loc_status == "In office")
 
-            # 2. Save it to the database model
             log_entry = models.ClockLogs(
                 employee_id=emp_data["id"],
                 punch_timestamp=row['punch_timestamp'],
@@ -104,7 +104,7 @@ async def process_csv_upload(file, db: Session):
                 longitude=row['longitude'],
                 punch_status=row.get('punch_status'),
                 is_valid=is_valid_punch, 
-                location_status=loc_status, # <--- THIS IS THE MAGIC LINE
+                location_status=loc_status, 
                 device_identifier=row.get('device_identifier'),
                 address=row.get('address')
             )
@@ -130,7 +130,7 @@ def calculate_daily_attendance(target_date: date, db: Session):
         'employee_id': log.employee_id,
         'punch_timestamp': log.punch_timestamp,
         'is_valid': log.is_valid,
-        'location_status': log.location_status # <--- PULL FROM DB
+        'location_status': log.location_status 
     } for log in logs])
     
     grouped = df_logs.groupby('employee_id')
@@ -158,7 +158,7 @@ def calculate_daily_attendance(target_date: date, db: Session):
                 login_time=first_punch, logout_time=last_punch,
                 total_working_hours=round(duration, 2), 
                 is_valid=attendance_is_valid,
-                location_status=daily_loc_status # <--- SAVE TO DB
+                location_status=daily_loc_status 
             )
             db.add(new_record)
         records_updated += 1
@@ -167,7 +167,25 @@ def calculate_daily_attendance(target_date: date, db: Session):
     return records_updated
 
 
-def fetch_daily_report(target_date: str, db: Session):
+def process_entire_month(month: int, year: int, db: Session):
+    _, num_days = calendar.monthrange(year, month)
+    
+    total_records = 0
+    days_with_data = 0
+    
+    # Loop through every day in the month
+    for day in range(1, num_days + 1):
+        current_date = date(year, month, day)
+        records_updated = calculate_daily_attendance(current_date, db)
+        
+        if records_updated > 0:
+            total_records += records_updated
+            days_with_data += 1
+            
+    return {"days_processed": days_with_data, "total_daily_records_created": total_records}
+
+
+def fetch_daily_report_csv(target_date: str, db: Session):
     records = db.query(models.DailyAttendance, models.EmployeeMaster).join(
         models.EmployeeMaster, models.DailyAttendance.employee_id == models.EmployeeMaster.employee_id
     ).filter(models.DailyAttendance.attendance_date == target_date).all()
@@ -179,24 +197,71 @@ def fetch_daily_report(target_date: str, db: Session):
             "Employee Name": emp.employee_name,
             "In Time": att.login_time.strftime("%H:%M") if att.login_time else "-",
             "Out Time": att.logout_time.strftime("%H:%M") if att.logout_time else "-",
-            "Hours": f"{att.total_working_hours} hrs" if att.total_working_hours else "-",
-            "Status": att.is_valid, 
+            "Hours": round(att.total_working_hours, 2) if att.total_working_hours else 0,
+            # Notice the "Status" line is completely gone now!
             "Location": att.location_status 
         })
-    
-    return {
-        "title": "Daily Attendance Snapshot",
-        "subtitle": f"Workforce statistics for {target_date}",
-        "dateStr": target_date,
-        "columns": ["Employee Code", "Employee Name", "In Time", "Out Time", "Hours", "Status", "Location"],
-        "rows": rows
-    }
+        
+    df = pd.DataFrame(rows)
+    return df.to_csv(index=False)
 
-def fetch_monthly_summary(month: int, year: int, db: Session):
-    return {
-         "title": "Monthly Attendance Rollup",
-         "subtitle": f"Summary for {month}/{year}",
-         "dateStr": f"{year}-{month:02d}",
-         "columns": ["Employee Code", "Employee Name", "Office Days", "Remote Days", "Total Days"],
-         "rows": [] 
-    }
+
+def fetch_monthly_summary_csv(month: int, year: int, db: Session):
+    records = db.query(models.DailyAttendance, models.EmployeeMaster).join(
+        models.EmployeeMaster, models.DailyAttendance.employee_id == models.EmployeeMaster.employee_id
+    ).all()
+    
+    summary_dict = {}
+    
+    for att, emp in records:
+        if att.attendance_date.month == int(month) and att.attendance_date.year == int(year):
+            emp_code = emp.employee_code
+            
+            if emp_code not in summary_dict:
+                summary_dict[emp_code] = {
+                    "employee_id": emp.employee_id,
+                    "Employee Code": emp_code,
+                    "Employee Name": emp.employee_name,
+                    "Office Days": 0,
+                    "Remote Days": 0,
+                    "Total Days": 0
+                }
+            
+            if att.location_status == "In office":
+                summary_dict[emp_code]["Office Days"] += 1
+            elif att.location_status == "REMOTE":
+                summary_dict[emp_code]["Remote Days"] += 1
+                
+            summary_dict[emp_code]["Total Days"] += 1
+            
+    # Normalize DB Save: Only saving employee_id to the table
+    for emp_code, data in summary_dict.items():
+        existing_summary = db.query(models.MonthlySummary).filter_by(
+            employee_id=data["employee_id"], month=int(month), year=int(year)
+        ).first()
+        
+        if existing_summary:
+            existing_summary.office_days = data["Office Days"]
+            existing_summary.remote_days = data["Remote Days"]
+            existing_summary.total_days_present = data["Total Days"]
+        else:
+            new_summary = models.MonthlySummary(
+                employee_id=data["employee_id"],
+                month=int(month),
+                year=int(year),
+                office_days=data["Office Days"],
+                remote_days=data["Remote Days"],
+                total_days_present=data["Total Days"]
+            )
+            db.add(new_summary)
+            
+    db.commit()
+            
+    # Generate CSV Blob for the user with Name and Code attached
+    rows = [
+        {k: v for k, v in data.items() if k != "employee_id"} 
+        for data in summary_dict.values()
+    ]
+    
+    df = pd.DataFrame(rows)
+    return df.to_csv(index=False)
