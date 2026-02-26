@@ -9,7 +9,7 @@ class LocationMaster(Base):
     location_name = Column(String(150), nullable=False)
     latitude = Column(Float, nullable=False)
     longitude = Column(Float, nullable=False)
-    radius = Column(Integer, nullable=False, default=100)
+    radius = Column(Integer, nullable=False, default=1000)
 
 class EmployeeMaster(Base):
     __tablename__ = "employee_master"
@@ -28,7 +28,7 @@ class ClockLogs(Base):
     longitude = Column(Float, nullable=False)
     punch_status = Column(String(10))
     is_valid = Column(Boolean) 
-    location_status = Column(String(20)) # <--- NEW COLUMN
+    location_status = Column(String(20)) # <--- This is the line Python was missing!
     device_identifier = Column(String(100))
     address = Column(Text)
 
@@ -41,5 +41,17 @@ class DailyAttendance(Base):
     logout_time = Column(DateTime)
     total_working_hours = Column(Float)
     is_valid = Column(Boolean)
-    location_status = Column(String(20)) # <--- NEW COLUMN
+    location_status = Column(String(20)) # <--- This is the line Python was missing!
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class MonthlySummary(Base):
+    __tablename__ = "monthly_summary"
+    summary_id = Column(Integer, primary_key=True, index=True)
+    employee_id = Column(Integer, ForeignKey("employee_master.employee_id"), nullable=False)
+    month = Column(Integer, nullable=False)
+    year = Column(Integer, nullable=False)
+    office_days = Column(Integer, default=0)
+    remote_days = Column(Integer, default=0)
+    total_days_present = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
