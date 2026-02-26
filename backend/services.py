@@ -55,7 +55,6 @@ async def process_csv_upload(file, db: Session):
     # Sync Employees
     unique_employees = df[["employee_code", "employee_name"]].drop_duplicates(subset=['employee_code'])
     
-    # Get the default location ID (assuming ID 1 exists from the SQL script)
     default_location = db.query(models.LocationMaster).first()
     default_loc_id = default_location.location_id if default_location else None
 
@@ -65,13 +64,12 @@ async def process_csv_upload(file, db: Session):
             new_emp = models.EmployeeMaster(
                 employee_code=row['employee_code'], 
                 employee_name=row['employee_name'],
-                assigned_location_id=default_loc_id, # Link new employees to default location
+                assigned_location_id=default_loc_id, 
                 is_valid=True
             )
             db.add(new_emp)
     db.commit()
 
-    # Pre-fetch employees and their assigned locations for dynamic geofencing
     employees_in_db = db.query(models.EmployeeMaster, models.LocationMaster).outerjoin(
         models.LocationMaster, models.EmployeeMaster.assigned_location_id == models.LocationMaster.location_id
     ).all()
@@ -87,14 +85,17 @@ async def process_csv_upload(file, db: Session):
     for _, row in df.iterrows():
         emp_data = emp_map.get(row['employee_code'])
         if emp_data:
-            # DYNAMIC GEOFENCING HAPPENS HERE
-            is_valid_punch = utils.is_within_geofence(
+            # 1. Capture the "In office" or "REMOTE" string
+            loc_status = utils.get_location_status(
                 lat=row['latitude'],
                 lon=row['longitude'],
                 office_lat=emp_data["loc_lat"],
                 office_lon=emp_data["loc_lon"],
                 radius=emp_data["radius"]
             )
+            
+            # 2. Boolean is True if they are in office, False if remote
+            is_valid_punch = (loc_status == "In office")
 
             log_entry = models.ClockLogs(
                 employee_id=emp_data["id"],
@@ -102,7 +103,8 @@ async def process_csv_upload(file, db: Session):
                 latitude=row['latitude'],
                 longitude=row['longitude'],
                 punch_status=row.get('punch_status'),
-                is_valid=is_valid_punch, # Store boolean
+                is_valid=is_valid_punch, 
+                location_status=loc_status, # <--- SAVE TO DB
                 device_identifier=row.get('device_identifier'),
                 address=row.get('address')
             )
@@ -127,7 +129,8 @@ def calculate_daily_attendance(target_date: date, db: Session):
     df_logs = pd.DataFrame([{
         'employee_id': log.employee_id,
         'punch_timestamp': log.punch_timestamp,
-        'is_valid': log.is_valid
+        'is_valid': log.is_valid,
+        'location_status': log.location_status # <--- PULL FROM DB
     } for log in logs])
     
     grouped = df_logs.groupby('employee_id')
@@ -138,9 +141,9 @@ def calculate_daily_attendance(target_date: date, db: Session):
         last_punch = group['punch_timestamp'].max()
         duration = (last_punch - first_punch).total_seconds() / 3600 if first_punch != last_punch else 0
         
-        # Determine if attendance is valid (Boolean)
         first_log = group.loc[group['punch_timestamp'].idxmin()]
         attendance_is_valid = bool(first_log['is_valid'] and duration > 4)
+        daily_loc_status = first_log['location_status'] # Inherit the remote/in-office status from the first punch
             
         existing_record = db.query(models.DailyAttendance).filter_by(employee_id=emp_id, attendance_date=target_date).first()
         if existing_record:
@@ -148,12 +151,14 @@ def calculate_daily_attendance(target_date: date, db: Session):
             existing_record.logout_time = last_punch
             existing_record.total_working_hours = round(duration, 2)
             existing_record.is_valid = attendance_is_valid
+            existing_record.location_status = daily_loc_status
         else:
             new_record = models.DailyAttendance(
                 employee_id=emp_id, attendance_date=target_date,
                 login_time=first_punch, logout_time=last_punch,
                 total_working_hours=round(duration, 2), 
-                is_valid=attendance_is_valid
+                is_valid=attendance_is_valid,
+                location_status=daily_loc_status # <--- SAVE TO DB
             )
             db.add(new_record)
         records_updated += 1
@@ -175,14 +180,15 @@ def fetch_daily_report(target_date: str, db: Session):
             "In Time": att.login_time.strftime("%H:%M") if att.login_time else "-",
             "Out Time": att.logout_time.strftime("%H:%M") if att.logout_time else "-",
             "Hours": f"{att.total_working_hours} hrs" if att.total_working_hours else "-",
-            "Status": att.is_valid # This passes the Boolean to React
+            "Status": att.is_valid, 
+            "Location": att.location_status # <--- PASS TO REACT
         })
     
     return {
         "title": "Daily Attendance Snapshot",
         "subtitle": f"Workforce statistics for {target_date}",
         "dateStr": target_date,
-        "columns": ["Employee Code", "Employee Name", "In Time", "Out Time", "Hours", "Status"],
+        "columns": ["Employee Code", "Employee Name", "In Time", "Out Time", "Hours", "Status", "Location"],
         "rows": rows
     }
 
