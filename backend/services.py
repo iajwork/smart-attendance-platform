@@ -71,10 +71,10 @@ async def process_csv_upload(file, db: Session):
     employees_in_db = db.query(models.EmployeeMaster).all()
     emp_map = {emp.employee_code: emp.employee_id for emp in employees_in_db}
     
-    # Get all valid office locations from DB
+    # Get all valid office locations from DB (Now including the name!)
     locations_in_db = db.query(models.LocationMaster).all()
     all_office_locations = [
-        {"lat": loc.latitude, "lon": loc.longitude, "radius": loc.radius} 
+        {"name": loc.location_name, "lat": loc.latitude, "lon": loc.longitude, "radius": loc.radius} 
         for loc in locations_in_db
     ]
     
@@ -82,14 +82,14 @@ async def process_csv_upload(file, db: Session):
     for _, row in df.iterrows():
         emp_id = emp_map.get(row['employee_code'])
         if emp_id:
-            # Calculate status using new multi-office logic
             loc_status = utils.get_location_status(
                 lat=row['latitude'],
                 lon=row['longitude'],
                 all_office_locations=all_office_locations
             )
             
-            is_valid_punch = (loc_status == "In office")
+            # If they are NOT remote, it's a valid office punch!
+            is_valid_punch = (loc_status != "REMOTE")
 
             log_entry = models.ClockLogs(
                 employee_id=emp_id,
@@ -225,17 +225,17 @@ def fetch_monthly_summary_csv(month: int, year: int, db: Session):
                     "Total Days": 0
                 }
             
-            # Tally locations
-            if att.location_status == "In office":
-                summary_dict[emp_code]["Office Days"] += 1
-            elif att.location_status == "REMOTE":
+            # NEW TALLY LOGIC
+            if att.location_status == "REMOTE":
                 summary_dict[emp_code]["Remote Days"] += 1
             elif att.location_status == "invalid":
                 summary_dict[emp_code]["Invalid Days"] += 1
+            elif att.location_status: 
+                # If it's not Remote and not invalid, it's an Office Day!
+                summary_dict[emp_code]["Office Days"] += 1
                 
             summary_dict[emp_code]["Total Days"] += 1
             
-    # Normalize DB Save
     for emp_code, data in summary_dict.items():
         existing_summary = db.query(models.MonthlySummary).filter_by(
             employee_id=data["employee_id"], month=int(month), year=int(year)
@@ -260,7 +260,6 @@ def fetch_monthly_summary_csv(month: int, year: int, db: Session):
             
     db.commit()
             
-    # Generate CSV Blob
     rows = [
         {k: v for k, v in data.items() if k != "employee_id"} 
         for data in summary_dict.values()
