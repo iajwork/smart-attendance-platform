@@ -56,49 +56,43 @@ async def process_csv_upload(file, db: Session):
     # Sync Employees
     unique_employees = df[["employee_code", "employee_name"]].drop_duplicates(subset=['employee_code'])
     
-    default_location = db.query(models.LocationMaster).first()
-    default_loc_id = default_location.location_id if default_location else None
-
     for _, row in unique_employees.iterrows():
         existing = db.query(models.EmployeeMaster).filter_by(employee_code=row['employee_code']).first()
         if not existing:
             new_emp = models.EmployeeMaster(
                 employee_code=row['employee_code'], 
                 employee_name=row['employee_name'],
-                assigned_location_id=default_loc_id, 
                 is_valid=True
             )
             db.add(new_emp)
     db.commit()
 
-    employees_in_db = db.query(models.EmployeeMaster, models.LocationMaster).outerjoin(
-        models.LocationMaster, models.EmployeeMaster.assigned_location_id == models.LocationMaster.location_id
-    ).all()
+    # Get employee mapping
+    employees_in_db = db.query(models.EmployeeMaster).all()
+    emp_map = {emp.employee_code: emp.employee_id for emp in employees_in_db}
     
-    emp_map = {emp.EmployeeMaster.employee_code: {
-        "id": emp.EmployeeMaster.employee_id,
-        "loc_lat": emp.LocationMaster.latitude if emp.LocationMaster else None,
-        "loc_lon": emp.LocationMaster.longitude if emp.LocationMaster else None,
-        "radius": emp.LocationMaster.radius if emp.LocationMaster else 1000
-    } for emp in employees_in_db}
+    # Get all valid office locations from DB
+    locations_in_db = db.query(models.LocationMaster).all()
+    all_office_locations = [
+        {"lat": loc.latitude, "lon": loc.longitude, "radius": loc.radius} 
+        for loc in locations_in_db
+    ]
     
     records_inserted = 0
     for _, row in df.iterrows():
-        emp_data = emp_map.get(row['employee_code'])
-        if emp_data:
-            # Calculate status using utils.py
+        emp_id = emp_map.get(row['employee_code'])
+        if emp_id:
+            # Calculate status using new multi-office logic
             loc_status = utils.get_location_status(
                 lat=row['latitude'],
                 lon=row['longitude'],
-                office_lat=emp_data["loc_lat"],
-                office_lon=emp_data["loc_lon"],
-                radius=emp_data["radius"]
+                all_office_locations=all_office_locations
             )
             
             is_valid_punch = (loc_status == "In office")
 
             log_entry = models.ClockLogs(
-                employee_id=emp_data["id"],
+                employee_id=emp_id,
                 punch_timestamp=row['punch_timestamp'],
                 latitude=row['latitude'],
                 longitude=row['longitude'],
@@ -143,7 +137,12 @@ def calculate_daily_attendance(target_date: date, db: Session):
         
         first_log = group.loc[group['punch_timestamp'].idxmin()]
         attendance_is_valid = bool(first_log['is_valid'] and duration > 4)
-        daily_loc_status = first_log['location_status'] 
+        
+        # Check if they forgot to clock out (only 1 punch)
+        if first_punch == last_punch:
+            daily_loc_status = "invalid"
+        else:
+            daily_loc_status = first_log['location_status'] 
             
         existing_record = db.query(models.DailyAttendance).filter_by(employee_id=emp_id, attendance_date=target_date).first()
         if existing_record:
@@ -173,7 +172,6 @@ def process_entire_month(month: int, year: int, db: Session):
     total_records = 0
     days_with_data = 0
     
-    # Loop through every day in the month
     for day in range(1, num_days + 1):
         current_date = date(year, month, day)
         records_updated = calculate_daily_attendance(current_date, db)
@@ -198,12 +196,11 @@ def fetch_daily_report_csv(target_date: str, db: Session):
             "In Time": att.login_time.strftime("%H:%M") if att.login_time else "-",
             "Out Time": att.logout_time.strftime("%H:%M") if att.logout_time else "-",
             "Hours": round(att.total_working_hours, 2) if att.total_working_hours else 0,
-            # Notice the "Status" line is completely gone now!
             "Location": att.location_status 
         })
         
     df = pd.DataFrame(rows)
-    return df.to_csv(index=False)
+    return df.to_csv(index=False) 
 
 
 def fetch_monthly_summary_csv(month: int, year: int, db: Session):
@@ -224,17 +221,21 @@ def fetch_monthly_summary_csv(month: int, year: int, db: Session):
                     "Employee Name": emp.employee_name,
                     "Office Days": 0,
                     "Remote Days": 0,
+                    "Invalid Days": 0,
                     "Total Days": 0
                 }
             
+            # Tally locations
             if att.location_status == "In office":
                 summary_dict[emp_code]["Office Days"] += 1
             elif att.location_status == "REMOTE":
                 summary_dict[emp_code]["Remote Days"] += 1
+            elif att.location_status == "invalid":
+                summary_dict[emp_code]["Invalid Days"] += 1
                 
             summary_dict[emp_code]["Total Days"] += 1
             
-    # Normalize DB Save: Only saving employee_id to the table
+    # Normalize DB Save
     for emp_code, data in summary_dict.items():
         existing_summary = db.query(models.MonthlySummary).filter_by(
             employee_id=data["employee_id"], month=int(month), year=int(year)
@@ -243,6 +244,7 @@ def fetch_monthly_summary_csv(month: int, year: int, db: Session):
         if existing_summary:
             existing_summary.office_days = data["Office Days"]
             existing_summary.remote_days = data["Remote Days"]
+            existing_summary.invalid_days = data["Invalid Days"]
             existing_summary.total_days_present = data["Total Days"]
         else:
             new_summary = models.MonthlySummary(
@@ -251,17 +253,18 @@ def fetch_monthly_summary_csv(month: int, year: int, db: Session):
                 year=int(year),
                 office_days=data["Office Days"],
                 remote_days=data["Remote Days"],
+                invalid_days=data["Invalid Days"],
                 total_days_present=data["Total Days"]
             )
             db.add(new_summary)
             
     db.commit()
             
-    # Generate CSV Blob for the user with Name and Code attached
+    # Generate CSV Blob
     rows = [
         {k: v for k, v in data.items() if k != "employee_id"} 
         for data in summary_dict.values()
     ]
     
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(rows, columns=["Employee Code", "Employee Name", "Office Days", "Remote Days", "Invalid Days", "Total Days"])
     return df.to_csv(index=False)
