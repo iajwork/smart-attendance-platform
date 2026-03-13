@@ -23,7 +23,7 @@ def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
 def get_location_status(lat: float, lon: float, all_office_locations: list) -> str:
     """
     Checks the employee's lat/lon against a list of ALL valid office locations.
-    If they are within the radius of ANY office, they are 'In office'.
+    If they are within the radius of ANY office, return the specific office name.
     """
     # ------------------------------------------------------
     # BASIC VALIDATION
@@ -37,7 +37,8 @@ def get_location_status(lat: float, lon: float, all_office_locations: list) -> s
     for office in all_office_locations:
         office_lat = office.get('lat')
         office_lon = office.get('lon')
-        radius = office.get('radius', 100) # Default to 100m if missing
+        radius = office.get('radius', 100)
+        office_name = office.get('name') # <--- We grab the specific name here
         
         if pd.isna(office_lat) or pd.isna(office_lon):
             continue
@@ -45,7 +46,7 @@ def get_location_status(lat: float, lon: float, all_office_locations: list) -> s
         distance = calculate_distance(lat, lon, office_lat, office_lon)
         
         if distance <= radius:
-            return "In office" # Match found!
+            return office_name # <--- Return "Seagate - Pune" instead of "In office"
             
     # If no matches were found after checking all offices
     return "REMOTE"
